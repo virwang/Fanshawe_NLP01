@@ -2,22 +2,15 @@
 import numpy as np
 import pickle
 import os
-<<<<<<< HEAD
 import re
 import pandas as pd
-=======
->>>>>>> parent of 1ae06cc (update the search logic and add the basic knowkedge answer)
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 class MaintenanceBrain:
     def __init__(self, vector_path='expert_vectors.npy', answer_path='expert_answers.pkl'):
-        """
-        Initializes the AI Logic: Loads NLP model and expert data.
-        """
-        # Load the sentence transformer model
+        # Load the NLP model
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
-<<<<<<< HEAD
         self.df_answers = pd.read_pickle(answer_path)
 
         # Define cluster map:
@@ -37,55 +30,105 @@ class MaintenanceBrain:
 
 
         # Load data assets
-=======
-        
-        # Security check for data files
->>>>>>> parent of 1ae06cc (update the search logic and add the basic knowkedge answer)
         if not os.path.exists(vector_path) or not os.path.exists(answer_path):
-            raise FileNotFoundError("System assets (.npy or .pkl) are missing!")
+            raise FileNotFoundError("Data assets missing! Ensure .npy and .pkl files exist.")
             
         self.expert_vectors = np.load(vector_path)
         with open(answer_path, 'rb') as f:
             self.expert_answers = pickle.load(f)
 
-        # --- REFINEMENT LOGIC ---
-        # Map fragmented expert notes to professional sentences
-        self.refinement_map = {
-            "chown the files": "Update the file ownership using the 'chown' command to ensure proper permissions in the new directory.",
-            "tail -f": "Monitor the log files in real-time by executing the 'tail -f' command.",
-            "sudo service gdm stop": "Properly terminate the display manager using 'sudo service gdm stop' before making changes."
+        # INTERNAL KNOWLEDGE BASE (The "basic_kb")
+        # Handles fundamental commands that might be missing from the expert logs.
+        self.basic_kb = {
+            "list user": "To see all users: `cat /etc/passwd`. For logged-in users: `who` or `w`.",
+            "show user": "To see all users: `cat /etc/passwd`. For logged-in users: `who` or `w`.",
+            "check user": "To see all users: `cat /etc/passwd`. For logged-in users: `who` or `w`.",
+            "permission": "Use `chmod` to change permissions (e.g., `chmod 755 filename`).",
+            "disk space": "Use `df -h` to check free space or `lsblk` for partitions.",
+            "reboot": "Run `sudo reboot` or `sudo shutdown -r now` to restart.",
+            "install": "Run `sudo apt update && sudo apt install [package_name]`."
         }
 
-    def _post_process(self, raw_text):
+    def _extract_actionable_steps(self, text):
         """
-        Internal method to polish the raw database text.
+        Extracts terminal commands from expert logs. 
+        Fixed to avoid UnboundLocalError.
         """
-        # 1. Check for predefined professional phrases
-        for key, refined in self.refinement_map.items():
-            if key.lower() in raw_text.lower():
-                return refined
+        # Pattern to find technical commands
+        cmd_pattern = r'(sudo|apt|chmod|chown|systemctl|cat /etc/|ls -|grep|tail -f|/var/log)'
+        lines = re.split(r'[\n;]', text)
         
-        # 2. General formatting (Capitalize and add period)
-        processed = raw_text.strip().capitalize()
-        if not processed.endswith(('.', '!', '?')):
-            processed += '.'
-        return processed
+        # Filter lines that contain commands
+        actions = [line.strip() for line in lines if re.search(cmd_pattern, line)]
+        
+        if actions:
+            # Define 'step' ONLY if we found an action
+            step = actions[0]
+            step = re.sub(r'^(try|maybe|just|you can)\s+', '', step, flags=re.IGNORECASE)
+            
+            # UI Polish: If the command is basically the whole text, don't repeat it
+            if len(step) >= len(text) * 0.8:
+                return f"**Actionable Step:** `{step}`"
+            
+            return f"**Actionable Step:** `{step}`\n\n**Expert Context:** {text}"
+        
+        # Fallback: If no command is found, just return the text normally
+        return text.capitalize()
 
-    def search(self, user_query, threshold=0.75):
-        """
-        Core search function: Math stays here, UI stays away.
-        """
-        query_vec = self.model.encode([user_query])
-        similarities = cosine_similarity(query_vec, self.expert_vectors)[0]
+
+    # def _extract_actionable_steps(self, text):
+    #     """
+    #     Extracts terminal commands from expert logs to provide a direct answer.
+    #     """
+    #     # Matches common Linux commands or file paths
+    #     cmd_pattern = r'(sudo|apt|chmod|chown|systemctl|cat /etc/|ls -|grep|df -h)'
+    #     lines = re.split(r'[\n;]', text)
         
-        best_idx = np.argmax(similarities)
-        best_score = similarities[best_idx]
+    #     # Priority: find lines containing actual commands
+    #     actions = [line.strip() for line in lines if re.search(cmd_pattern, line)]
+        
+    #     if actions:
+    #         step = actions[0]
+    #         if len(step) >= len(text) * 0.8:
+    #             return f"**Actionable Step:** `{step}`"
+        
+    #     # If the original text is long, show the context for reference
+    #     return f"**Actionable Step:** `{step}`\n\n**Expert Context:** {text}"
+        
+    #     return text
+
+    def search(self, user_query, threshold=0.60):
+        """
+        Hybrid search: Checks basic_kb first, then the vector database.
+        """
+        query_lower = user_query.lower()
+
+        # 1. KEYWORD INTERCEPTION (Quick fix for basic questions)
+        for key, value in self.basic_kb.items():
+            if key in query_lower:
+                return {
+                    "found": True,
+                    "confidence": 1.0, 
+                    "answer": value
+                }
+
+        # 2. SEMANTIC SEARCH (For complex expert logs)
+        query_vec = self.model.encode([user_query])
+        sims = cosine_similarity(query_vec, self.expert_vectors)[0]
+        
+        best_idx = np.argmax(sims)
+        best_score = similarities = sims[best_idx]
         
         if best_score >= threshold:
             raw_answer = self.expert_answers[best_idx]
             return {
                 "found": True, 
                 "confidence": best_score, 
-                "answer": self._post_process(raw_answer) # Output is now polished
+                "answer": self._extract_actionable_steps(raw_answer)
             }
-        return {"found": False, "confidence": best_score, "answer": None}
+        
+        return {
+            "found": False, 
+            "confidence": best_score, 
+            "answer": "No confident match found. Try using keywords like 'sudo' or 'permissions'."
+        }
