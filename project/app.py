@@ -43,9 +43,23 @@ if user_input:
         
     if res['found']:
         st.subheader("✅ Expert-Verified Solution")
+
+        topic = res.get('topic', 'General Support')
+        st.markdown(f"**📍 Question Categorize：** :orange-background[{topic}]")
+
         st.info(res['answer']) # This will show the polished version from brain.py
-        st.caption(f"Confidence: {res['confidence']:.2f}")
+        
+        #Show confidence score and cluster ID for debugging/insight
+        col_meta1, col_meta2 = st.columns(2)
+        with col_meta1:
+            st.caption(f"🔍 Semantic matching degree: {res['confidence']:.2%}")
+        with col_meta2:
+            # Debug info: Show cluster ID if available, else show N/A
+            # st.caption(f"Cluster ID: {res.get('cluster_id', 'N/A')}")
+            pass
+
         st.success("Issue identified. Follow the steps above.")
+        
     else:
         st.error("⚠️ No matching solution found.")
         st.warning("""

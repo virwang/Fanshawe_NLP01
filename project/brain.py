@@ -11,29 +11,27 @@ class MaintenanceBrain:
     def __init__(self, vector_path='expert_vectors.npy', answer_path='expert_answers.pkl'):
         # Load the NLP model
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        
+        # Load the DataFrame containing expert answers and their cluster IDs
+        if not os.path.exists(answer_path):
+            raise FileNotFoundError(f"File {answer_path} not found")
         self.df_answers = pd.read_pickle(answer_path)
 
+        # Load the expert vectors from the .npy file
+        if not os.path.exists(vector_path):
+            raise FileNotFoundError(f"File {vector_path} not found")
+        self.expert_vectors = np.load(vector_path)
+        
         # Define cluster map:
         self.topic_map = {
-        0: "System Permissions",
-        1: "Network Configuration",
-        2: "Package Installation",
-        3: "User Account Management",
-        4: "Hardware Drivers",
-        5: "Display & Desktop",
-        6: "Security & Firewall",
-        7: "Disk & Storage",
-        8: "Boot & Kernel",
-        9: "General Support"
-    }
-
-
-
-        # Load data assets
-        if not os.path.exists(vector_path) or not os.path.exists(answer_path):
-            raise FileNotFoundError("Data assets missing! Ensure .npy and .pkl files exist.")
+        0: "CLI & Remote Admin",
+            1: "Hardware & Media Drivers",
+            2: "Package & Software Operations",
+            3: "Disk & Boot Management",
+            4: "Desktop & System Tweaks"
+            }
             
-        self.expert_vectors = np.load(vector_path)
+            
         with open(answer_path, 'rb') as f:
             self.expert_answers = pickle.load(f)
 
@@ -109,7 +107,8 @@ class MaintenanceBrain:
                 return {
                     "found": True,
                     "confidence": 1.0, 
-                    "answer": value
+                    "answer": value,
+                    "topic": "General Support"
                 }
 
         # 2. SEMANTIC SEARCH (For complex expert logs)
@@ -120,15 +119,21 @@ class MaintenanceBrain:
         best_score = similarities = sims[best_idx]
         
         if best_score >= threshold:
-            raw_answer = self.expert_answers[best_idx]
+            matched_row = self.df_answers.iloc[best_idx]
+            cluster_id = matched_row['cluster_id']
+            raw_answer = matched_row['answer']
+
             return {
                 "found": True, 
-                "confidence": best_score, 
-                "answer": self._extract_actionable_steps(raw_answer)
+                "confidence": float(best_score), 
+                "answer": self._extract_actionable_steps(raw_answer),
+                "topic": self.topic_map.get(cluster_id, "Specialist Insight") # Get topic name from cluster ID, default to "Specialist Insight"
             }
         
         return {
             "found": False, 
             "confidence": best_score, 
-            "answer": "No confident match found. Try using keywords like 'sudo' or 'permissions'."
+            "answer": "No confident match found. Try using keywords like 'sudo' or 'permissions'.",
+            "topic": "Unclassified"
+
         }
